@@ -54,7 +54,7 @@ pub struct Injector {
 
 impl Injector {
     pub fn new() -> io::Result<Injector> {
-        let mut keys = evdev::AttributeSet::<evdev::KeyCode>::new();
+        let mut keys = evdev::AttributeSet::<evdev::Key>::new();
         let mut vks: Vec<u16> = (0x41..=0x5A).collect();
         vks.extend_from_slice(&[
             0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD,
@@ -62,12 +62,12 @@ impl Injector {
         ]);
         for vk in vks {
             if let Some(code) = vk_to_key(vk) {
-                keys.insert(evdev::KeyCode::new(code));
+                keys.insert(evdev::Key::new(code));
             }
         }
-        keys.insert(evdev::KeyCode::KEY_LEFTSHIFT);
-        keys.insert(evdev::KeyCode::KEY_LEFTCTRL);
-        keys.insert(evdev::KeyCode::KEY_V);
+        keys.insert(evdev::Key::KEY_LEFTSHIFT);
+        keys.insert(evdev::Key::KEY_LEFTCTRL);
+        keys.insert(evdev::Key::KEY_V);
         let dev = evdev::uinput::VirtualDeviceBuilder::new()?
             .name("punto-rs virtual keyboard")
             .with_keys(&keys)?
@@ -84,7 +84,7 @@ impl Injector {
             Some(c) => c,
             None => return Ok(()),
         };
-        let shift_code = evdev::KeyCode::KEY_LEFTSHIFT.code();
+        let shift_code = evdev::Key::KEY_LEFTSHIFT.code();
         if shift {
             self.dev.emit(&[Self::key_event(shift_code, 1)])?;
         }
@@ -104,8 +104,8 @@ impl Injector {
 
     /// Ctrl+V — вставка из буфера (работает независимо от раскладки).
     pub fn paste(&mut self) -> io::Result<()> {
-        let ctrl = evdev::KeyCode::KEY_LEFTCTRL.code();
-        let v = evdev::KeyCode::KEY_V.code();
+        let ctrl = evdev::Key::KEY_LEFTCTRL.code();
+        let v = evdev::Key::KEY_V.code();
         self.dev.emit(&[Self::key_event(ctrl, 1)])?;
         self.dev.emit(&[Self::key_event(v, 1), Self::key_event(v, 0)])?;
         self.dev.emit(&[Self::key_event(ctrl, 0)])?;
@@ -164,8 +164,8 @@ fn keyboards() -> Vec<evdev::Device> {
                 let is_kbd = dev
                     .supported_keys()
                     .map(|k| {
-                        k.contains(evdev::KeyCode::KEY_A)
-                            && k.contains(evdev::KeyCode::KEY_SPACE)
+                        k.contains(evdev::Key::KEY_A)
+                            && k.contains(evdev::Key::KEY_SPACE)
                     })
                     .unwrap_or(false);
                 if is_kbd {
@@ -215,7 +215,7 @@ pub fn serve(mut app: App) -> io::Result<()> {
                 Err(_) => continue,
             };
             for ev in events {
-                if let evdev::EventSummary::Key(_, key, value) = ev.destructure() {
+                if let evdev::InputEventKind::Key(key) = ev.kind() {
                     // раз в 2 секунды сверяем раскладку с системой:
                     // пользователь мог переключить её сам
                     if last_probe.elapsed() > std::time::Duration::from_secs(2) {
@@ -225,13 +225,14 @@ pub fn serve(mut app: App) -> io::Result<()> {
                         }
                     }
                     let code = key.code();
-                    if code == evdev::KeyCode::KEY_LEFTSHIFT.code()
-                        || code == evdev::KeyCode::KEY_RIGHTSHIFT.code()
+                    let value = ev.value();
+                    if code == evdev::Key::KEY_LEFTSHIFT.code()
+                        || code == evdev::Key::KEY_RIGHTSHIFT.code()
                     {
                         shift = value != 0;
                         continue;
                     }
-                    if code == evdev::KeyCode::KEY_CAPSLOCK.code() {
+                    if code == evdev::Key::KEY_CAPSLOCK.code() {
                         if value == 1 {
                             caps = !caps;
                         }
