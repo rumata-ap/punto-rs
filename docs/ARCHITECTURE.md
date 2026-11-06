@@ -35,6 +35,11 @@ io::switch_layout + uinput   смена раскладки, Backspace×N, печ
 | `app.rs` | связка + правила верхнего уровня | нет |
 | `translit.rs` | транслитерация имён | нет |
 | `config.rs` | ini-конфиг | нет |
+| `layout.rs` | чтение/установка раскладки (g3kb-switch, xkb-switch, KDE D-Bus, gsettings) | процессы, `sh -c` |
+| `output.rs` | выбор способа вставки (uinput / clipboard / command) | нет |
+| `doctor.rs` | диагностика среды (`punto doctor`) | процессы, `/dev` |
+| `vkmap.rs` | VK ↔ Linux KEY_* | нет |
+| `keymap_xkb.rs` | раскладки через libxkbcommon (фича `xkb`) | Linux + feature |
 | `io/mod.rs` | evdev-ввод, uinput-вывод, смена раскладки | Linux + feature |
 
 Ядро (всё до `io`) не знает про ОС и покрыто тестами в `tests/engine_tests.rs`.
