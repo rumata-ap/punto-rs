@@ -1,0 +1,15 @@
+# «мусор»: русские слова, набранные в EN-раскладке.
+# B = совпадение по префиксу, E не выставлен — именно это заставляет
+# алгоритм переключить раскладку и перепечатать слово.
+B	ghbdtn
+B	gjrf
+B	ntrcn
+B	ckjdf
+B	hf,jnf
+B	ctujlyz
+B	pfdnhf
+B	cgfcb,j
+B	gj;frekbcnf
+B	rjvgm.nth
+B	hfcrkflrf
+B	rkfdbnefhb

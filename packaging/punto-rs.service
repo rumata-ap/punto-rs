@@ -1,0 +1,17 @@
+[Unit]
+Description=punto-rs — автоматическое переключение раскладки
+Documentation=https://github.com/rumata-ap/punto-rs
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/punto-rs run
+Restart=on-failure
+RestartSec=2
+# демон читает /dev/input и пишет в /dev/uinput, ему нужна группа input
+SupplementaryGroups=input
+Nice=5
+
+[Install]
+WantedBy=graphical-session.target
