@@ -66,6 +66,8 @@ impl Injector {
             }
         }
         keys.insert(evdev::KeyCode::KEY_LEFTSHIFT);
+        keys.insert(evdev::KeyCode::KEY_LEFTCTRL);
+        keys.insert(evdev::KeyCode::KEY_V);
         let dev = evdev::uinput::VirtualDeviceBuilder::new()?
             .name("punto-rs virtual keyboard")
             .with_keys(&keys)?
@@ -100,6 +102,16 @@ impl Injector {
         Ok(())
     }
 
+    /// Ctrl+V — вставка из буфера (работает независимо от раскладки).
+    pub fn paste(&mut self) -> io::Result<()> {
+        let ctrl = evdev::KeyCode::KEY_LEFTCTRL.code();
+        let v = evdev::KeyCode::KEY_V.code();
+        self.dev.emit(&[Self::key_event(ctrl, 1)])?;
+        self.dev.emit(&[Self::key_event(v, 1), Self::key_event(v, 0)])?;
+        self.dev.emit(&[Self::key_event(ctrl, 0)])?;
+        Ok(())
+    }
+
     pub fn type_text(&mut self, text: &str) -> io::Result<()> {
         for ch in text.chars() {
             if ch == ' ' {
@@ -119,6 +131,24 @@ pub fn switch_layout(command: &str) -> io::Result<()> {
     let status = Command::new("sh").args(["-c", command]).status()?;
     if !status.success() {
         eprintln!("punto-rs: команда смены раскладки вернула {}", status);
+    }
+    Ok(())
+}
+
+/// Положить текст в буфер обмена (wl-copy). Нужен `wl-clipboard`.
+pub fn set_clipboard(text: &str) -> io::Result<()> {
+    let mut path = std::env::temp_dir();
+    path.push(format!("punto-rs-clip-{}.txt", std::process::id()));
+    std::fs::write(&path, text)?;
+    let status = Command::new("sh")
+        .args(["-c", &format!("wl-copy < '{}'", path.display())])
+        .status()?;
+    let _ = std::fs::remove_file(&path);
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "wl-copy не сработал (поставьте wl-clipboard)",
+        ));
     }
     Ok(())
 }
@@ -167,6 +197,16 @@ pub fn serve(mut app: App) -> io::Result<()> {
         eprintln!("punto-rs: раскладку определить не удалось, считаю {:?}", app.layout);
     }
     let mut last_probe = std::time::Instant::now();
+    let switch_ok = crate::layout::detect(&app.cfg).is_some();
+    let wtype_ok = crate::doctor::has("wtype")
+        && crate::doctor::session_kind() != "wayland";
+    let strategy = crate::output::choose(&app.cfg, switch_ok, wtype_ok);
+    eprintln!(
+        "punto-rs: вывод текста — {} (переключение {}, wtype {})",
+        strategy.name(),
+        if switch_ok { "есть" } else { "нет" },
+        if wtype_ok { "есть" } else { "нет" }
+    );
 
     loop {
         for dev in devs.iter_mut() {
@@ -210,10 +250,35 @@ pub fn serve(mut app: App) -> io::Result<()> {
                         app.on_key(KeyPress { vk, shift, caps })
                     };
                     if let Action::Convert { to, erase, text } = action {
-                        let cmd = crate::layout::switch_command(&app.cfg, to);
-                        switch_layout(&cmd)?;
-                        injector.backspace(erase)?;
-                        injector.type_text(&text)?;
+                        use crate::output::Strategy;
+                        match &strategy {
+                            Strategy::Uinput => {
+                                let cmd = crate::layout::switch_command(&app.cfg, to);
+                                switch_layout(&cmd)?;
+                                injector.backspace(erase)?;
+                                injector.type_text(&text)?;
+                            }
+                            Strategy::Clipboard => {
+                                // текст идёт через буфер: раскладка не важна
+                                injector.backspace(erase)?;
+                                set_clipboard(&text)?;
+                                injector.paste()?;
+                                if switch_ok {
+                                    let cmd = crate::layout::switch_command(&app.cfg, to);
+                                    let _ = switch_layout(&cmd);
+                                }
+                            }
+                            Strategy::Command(cmd) => {
+                                injector.backspace(erase)?;
+                                let quoted = text.replace('\'', "'\\''");
+                                let full = cmd.replace("{text}", &format!("'{}'", quoted));
+                                let _ = switch_layout(&full);
+                                if switch_ok {
+                                    let sc = crate::layout::switch_command(&app.cfg, to);
+                                    let _ = switch_layout(&sc);
+                                }
+                            }
+                        }
                     }
                 }
             }

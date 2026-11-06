@@ -28,6 +28,7 @@ fn main() {
             one_shot(&text);
         }
         "run" => run(),
+        "doctor" => doctor(),
         "-h" | "--help" | "help" => usage(),
         other => {
             eprintln!("неизвестный режим: {}", other);
@@ -40,6 +41,7 @@ fn usage() {
     println!(
         "punto-rs — переключение раскладки как в Punto Switcher\n\n\
          uso:\n\
+           punto doctor     что доступно в этой среде и что доустановить\n\
            punto sim        интерактивный прогон: строки на stdin, текущая раскладка RU\n\
            punto sim --en   то же, но текущая раскладка EN\n\
            punto convert X  показать решение для строки X\n\
@@ -51,6 +53,19 @@ fn usage() {
 fn load_app() -> App {
     let cfg = Config::load(&config_path());
     App::new(cfg)
+}
+
+/// `punto doctor` — показать, что доступно в этой среде.
+fn doctor() {
+    let cfg = Config::load(&config_path());
+    for c in punto_rs::doctor::run(&cfg) {
+        let mark = match c.level {
+            punto_rs::doctor::Level::Ok => "ok  ",
+            punto_rs::doctor::Level::Warn => "warn",
+            punto_rs::doctor::Level::Fail => "FAIL",
+        };
+        println!("[{}] {:<16} {}", mark, c.name, c.detail);
+    }
 }
 
 fn sim() {

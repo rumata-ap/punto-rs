@@ -34,6 +34,10 @@ pub struct Config {
     pub layout_order: String,
     /// Источник «клавиша → символ»: `static` (встроенная таблица) или `xkb`.
     pub text_mapper: String,
+    /// Как вставлять исправленный текст: `auto` | `uinput` | `clipboard` | `command`.
+    pub output: String,
+    /// Команда вставки текста для `output = command` (`{text}` — подстановка).
+    pub type_command: String,
     /// Символы, из которых состоит слово.
     pub charset: String,
     pub dict_paths: Vec<PathBuf>,
@@ -51,6 +55,8 @@ impl Default for Config {
             layout_set_command: String::new(),
             layout_order: String::from("en,ru"),
             text_mapper: String::from("static"),
+            output: String::from("auto"),
+            type_command: String::from("wtype {text}"),
             charset: String::from(
                 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\
                  абвгдеёжзийклмнопрстуфхцчшщъыьэюя\
@@ -108,6 +114,8 @@ impl Config {
                 "layout_set_command" => cfg.layout_set_command = value.to_string(),
                 "layout_order" => cfg.layout_order = value.to_string(),
                 "text_mapper" => cfg.text_mapper = value.to_string(),
+                "output" => cfg.output = value.to_string(),
+                "type_command" => cfg.type_command = value.to_string(),
                 "charset" => cfg.charset = value.to_string(),
                 "dict" => {
                     let p = value.strip_prefix("~/").map(|rest| home().join(rest));

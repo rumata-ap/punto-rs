@@ -7,9 +7,11 @@
 pub mod buffer;
 pub mod config;
 pub mod dict;
+pub mod doctor;
 pub mod engine;
 pub mod keymap;
 pub mod layout;
+pub mod output;
 pub mod translit;
 pub mod vkmap;
 

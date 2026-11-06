@@ -34,7 +34,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Depends: libc6
-Recommends: xkb-switch | g3kb-switch
+Recommends: wl-clipboard, xkb-switch | g3kb-switch
 Maintainer: Aleksandr Ponomarev <palexxvlad@yandex.ru>
 Description: Punto-подобное переключение раскладки для Linux
  Автоматически переключает раскладку и перепечатывает слово,

@@ -177,29 +177,77 @@ sudo usermod -aG input "$USER"      # затем перелогиниться
 systemctl --user enable --now punto-rs.service
 ```
 
-## Ubuntu с новым GNOME (Wayland)
+## Wayland (GNOME, Ubuntu 24.04+ / 25.10+)
 
-Работает, но с оговорками — GNOME на Wayland не даёт приложениям напрямую
-управлять раскладкой:
+Первое, что нужно сделать на целевой машине:
 
-* **чтение клавиш** — работает: evdev это уровень ядра, Wayland не мешает;
-* **вставка текста** — работает: `uinput` создаёт виртуальную клавиатуру,
-  её видят все приложения;
-* **смена раскладки** — штатного API нет. Нужен `g3kb-switch`
-  (CLI + расширение GNOME Shell, ставится из репозитория проекта или
-  собирается через cmake). После установки расширения требуется
-  перезапуск сессии/GNOME Shell:
-  ```bash
-  sudo apt install libglib2.0-dev cmake   # для сборки
-  # собрать g3kb-switch, затем:
-  gnome-extensions enable g3kb-switch@g3kb-switch.org
-  g3kb-switch -p        # проверка: печатает текущую группу
-  ```
-* **без расширения** остаётся деградация: чтение раскладки через
-  `gsettings` часто отдаёт устаревшее значение, а переключение не
-  применяется — тогда авто-переключение будет работать только в одну
-  сторону (перепечатает слово, но раскладку не переключит).
+```bash
+punto doctor
+```
 
-Полностью предсказуемо ведёт себя X11-сессия (`xkb-switch`) и KDE
-(`org.kde.keyboard`).
+Доктор скажет, что доступно, а чего не хватает, и какую стратегию выберет.
+
+Проверенные факты, на которых построена работа под Wayland:
+
+* **mutter не поддерживает `virtual-keyboard-unstable-v1`** (issue #1974
+  открыт), поэтому `wtype` на GNOME Wayland **не работает**;
+* **`uinput` работает везде** — это уровень ядра, композитор видит
+  виртуальную клавиатуру как обычную;
+* **буфер обмена + Ctrl+V через uinput** работает независимо от раскладки
+  (нужен `wl-clipboard`);
+* **смена раскладки** штатного CLI не имеет: на GNOME нужен
+  `g3kb-switch` + расширение GNOME Shell; на KDE — D-Bus
+  `org.kde.keyboard`; на sway/Hyprland — их собственные команды.
+
+### Три стратегии вставки (`output` в конфиге)
+
+| стратегия | как | когда выбирается |
+|---|---|---|
+| `uinput` | Backspace × N, затем печать кодами клавиш | есть рабочее переключение раскладки |
+| `clipboard` | Backspace × N, `wl-copy`, Ctrl+V | переключения нет (GNOME без расширения) |
+| `command` | Backspace × N, внешняя команда (`wtype {text}`) | wlroots-композиторы (sway, Hyprland) |
+
+По умолчанию `output = auto`: wtype → uinput → clipboard.
+
+### Полное поведение на GNOME Wayland (рекомендуется)
+
+```bash
+sudo apt install wl-clipboard libglib2.0-dev cmake
+# собрать и установить g3kb-switch (CLI + расширение Shell)
+# затем в конфиге:
+#   layout_get_command = g3kb-switch -p
+#   layout_set_command = g3kb-switch -s {n}
+g3kb-switch -p     # проверка: печатает текущую группу
+```
+После установки расширения нужен перезаход в сессию.
+
+С этим набором работает всё: слово перепечатывается **и** раскладка
+переключается, как в Windows-Punto.
+
+### Без расширения (деградация, но работает)
+
+Ставим только `wl-clipboard`:
+
+```bash
+sudo apt install wl-clipboard
+```
+
+Демон сам выберет `clipboard`: текст подменяется через буфер, поэтому
+**символы всегда правильные**, но раскладка не переключится — следующее
+слово снова придётся исправлять. Для набора «одно слово не в той
+раскладке» этого обычно достаточно.
+
+### Ограничения буфера
+
+* не работает в полях, где запрещена вставка (некоторые поля пароля);
+* в терминалах вставка — `Ctrl+Shift+V`; для них задайте
+  `type_command = xdotool type --clearmodifiers {text}` или используйте
+  стратегию `uinput` с g3kb-switch.
+
+### KDE и wlroots
+
+* KDE Plasma (X11 и Wayland): `layout_get_command = qdbus org.kde.keyboard /Layouts org.kde.KeyboardLayouts.getLayout`, `layout_set_command = qdbus org.kde.keyboard /Layouts org.kde.KeyboardLayouts.setLayout {n}`;
+* sway: `layout_set_command = swaymsg input type:keyboard xkb_switch_layout next`;
+* Hyprland: `layout_set_command = hyprctl switchxkblayout all next`.
+
 
