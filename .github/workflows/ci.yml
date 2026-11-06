@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: кэш
+        uses: Swatinem/rust-cache@v2
+
+      - name: системные зависимости
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libxkbcommon-dev
+
+      - name: ядро (тесты, без фич)
+        run: cargo test --all-targets --verbose
+
+      - name: Linux-слой (evdev + uinput)
+        run: cargo check --features input-evdev --verbose
+
+      - name: Linux-слой с xkbcommon
+        run: cargo check --features "input-evdev xkb" --verbose
+
+      - name: релизная сборка
+        run: cargo build --release --features input-evdev
+
+      - name: бинарник запускается
+        run: ./target/release/punto doctor
