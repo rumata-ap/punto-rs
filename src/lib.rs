@@ -21,5 +21,9 @@ pub mod keymap_xkb;
 #[cfg(all(target_os = "linux", feature = "input-evdev"))]
 pub mod io;
 
+// иконка в трее: StatusNotifierItem по D-Bus, без GTK
+#[cfg(all(target_os = "linux", feature = "tray"))]
+pub mod tray;
+
 /// Собранная «машина»: словари + движок + буфер.
 pub mod app;

@@ -9,10 +9,11 @@ Punto Switcher 4.5.0.583 (см. `../punto-re/spec/algorithm.md`), словари
 
 | часть | статус |
 |---|---|
-| ядро: словарь, скорер, решение, буфер | готово, **23 теста** |
+| ядро: словарь, скорер, решение, буфер | готово, **40 тестов** |
 | `punto convert` / `punto sim` / `punto doctor` | работают, проверено |
 | Linux-слой: evdev → uinput | **собрано и проверено на Linux** (Ubuntu 24.04) |
 | режим `xkbcommon` (`--features xkb`) | собирается на Linux |
+| `punto tray` — иконка в трее (фича `tray`) | собирается, `ksni`/SNI без GTK; на GNOME нужен AppIndicator |
 | смена раскладки | `xkb-switch` / `g3kb-switch` / KDE D-Bus / sway / Hyprland |
 | Wayland | три стратегии вставки, полное поведение — с `g3kb-switch` |
 | `triggers.dat` оригинала | не перенесён (влияет на единичные случаи) |
@@ -22,7 +23,7 @@ Punto Switcher 4.5.0.583 (см. `../punto-re/spec/algorithm.md`), словари
 ```
 cargo build  --features input-evdev        → Finished (7.1 s)
 cargo check  --features "input-evdev xkb"  → Finished (3.8 s)
-cargo test                                 → 12 passed, 0 failed
+cargo test                                 → 40 passed, 0 failed
 ./target/debug/punto doctor                → отработал и верно диагностировал среду
 ```
 
@@ -70,6 +71,7 @@ sudo usermod -aG input "$USER"        # затем перелогиниться
 | группа `input` | чтение `/dev/input/event*` | **обязательно** |
 | `/dev/uinput` + udev-правило | эмуляция клавиатуры (Backspace, Ctrl+V) | **обязательно** |
 | `wl-clipboard` | стратегия `clipboard` (Wayland без расширения) | рекомендуется |
+| `gnome-shell-extension-appindicator` | показывать иконки трея на GNOME (`punto tray`) | для `punto tray` |
 | `g3kb-switch` + расширение GNOME | переключение раскладки на GNOME (и Wayland) | для полного поведения |
 | `xkb-switch` | переключение и чтение раскладки на X11 | для X11 |
 | `qdbus` (`qdbus-qt5`) | KDE: `org.kde.keyboard` | для KDE |
@@ -87,6 +89,12 @@ sudo cp packaging/99-punto-rs-uinput.rules /etc/udev/rules.d/
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 
+Проверить: `punto doctor` → `/dev/uinput: открывается на запись`. Без
+udev-правила устройство остаётся `root:root 0600`, и демон умирает на старте
+с `Permission denied`. Разовый `sudo chmod 660 /dev/uinput` работает только до
+перезагрузки — после неё права сбрасываются, и нужен именно правило из
+`packaging/` (см. `journalctl --user -u punto-rs`).
+
 ## Конфигурация
 
 `~/.config/punto-rs/config.ini` (путь переопределяется `PUNTO_CONFIG`).
@@ -97,7 +105,9 @@ sudo udevadm control --reload && sudo udevadm trigger
 | `max_word_len` | максимум символов в слове | `32` |
 | `detect_passwords` | не трогать похожее на пароль | `true` |
 | `dont_convert_capitals` | не трогать слова с заглавной | `false` |
-| `convert_hotkey` | VK-код ручной конвертации (`70` = ScrollLock, `19` = Pause) | `70` |
+| `convert_hotkey` | VK-код ручной конвертации (`0` — выключено; `145` = ScrollLock, `19` = Pause; буквы/цифры нельзя) | `0` |
+| `auto_convert` | конвертировать автоматически на границе слова (пробел, знак) | `false` |
+| `convert_chord` | комбинация ручной конвертации: `ctrl+shift` (любая сторона) или `rctrl+rshift` (только правые); третья клавиша между ними отменяет комбинацию, а повторное нажатие возвращает слово обратно (циклически) | `ctrl+shift` |
 | `switch_command` | «следующая раскладка» (X11) | `xkb-switch -n` |
 | `layout_get_command` | чтение раскладки (пусто = автопоиск) | — |
 | `layout_set_command` | установка нужной раскладки, `{n}` — индекс | — |
@@ -135,7 +145,8 @@ sudo udevadm control --reload && sudo udevadm trigger
 
 ```bash
 make build      # бинарник с evdev/uinput
-make test       # 23 теста (ядро)
+make test       # юнит- и интеграционные тесты (без фич — переносимо)
+cargo test --features "input-evdev,tray"       # весь набор, включая io и трей
 sh packaging/build-deb.sh                      # build/punto-rs_0.1.0_amd64.deb
 cargo check --features "input-evdev xkb"       # режим xkbcommon
 ```
@@ -151,6 +162,115 @@ systemctl --user enable --now punto-rs.service
 
 Словари в пакете — только демонстрационные; полные соберите
 `data/build_dict.py` (см. выше) или положите свои файлы в `~/.config/punto-rs/`.
+
+## Автозапуск при входе в систему
+
+Демон — юнит systemd **пользователя**, привязанный к графической сессии:
+раньше сессии ему нечего делать (нет ни раскладки, ни `/dev/uinput`).
+Юнит включён в `graphical-session.target`, поэтому поднимается при каждом входе.
+
+**Одной командой, без sudo** — бинарник, юниты, конфиг и словари в домашний
+каталог:
+
+```bash
+make install-user        # ~/.local/bin/punto-rs + ~/.config/systemd/user/*.service
+                         # + ~/.config/punto-rs/{config.ini,*.dict}, enable --now
+make uninstall-user      # обратно (конфиг и словари остаются)
+```
+
+Поведение свитчера постоянно по двум причинам:
+
+* **настройки по умолчанию уже рабочие** — `convert_chord = ctrl+shift`,
+  `convert_hotkey = 0`, `auto_convert = false`: конфиг можно вообще не заводить
+  (`Config::load` на отсутствующем файле отдаёт те же значения);
+* юнит `enabled`, поэтому при входе в систему демон стартует сам, а
+  `Restart=always` поднимает его после падения.
+
+Вручную то же самое:
+
+```bash
+# из пакета / make install (юнит в /usr/local/lib/systemd/user)
+systemctl --user enable --now punto-rs.service
+
+# свой бинарник в ~/.local/bin
+install -Dm644 packaging/punto-rs.service ~/.config/systemd/user/punto-rs.service
+systemctl --user daemon-reload
+systemctl --user enable --now punto-rs.service
+
+# проверка
+systemctl --user is-enabled punto-rs     # enabled
+systemctl --user is-active punto-rs      # active
+journalctl --user -u punto-rs -f         # «читаю N клавиатур(ы)», «вывод текста — uinput»
+```
+
+Права на `/dev/uinput` после перезагрузки даёт udev-правило (иначе `chmod`
+живёт до перезагрузки):
+
+```bash
+sudo cp packaging/99-punto-rs-uinput.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger
+```
+
+Почему это надёжно при входе в систему:
+
+| настройка | зачем |
+|---|---|
+| `WantedBy=`/`After=`/`PartOf=graphical-session.target` | старт и остановка вместе с сессией |
+| `ExecStartPre` ждёт `g3kb-switch -p` (до 60 с) | на входе расширение GNOME Shell ещё не готово |
+| `Restart=always` + `RestartSec=3` | демон поднимается после падения или `kill -9` |
+| `StartLimitIntervalSec=0` | systemd не «сдаётся» после 5 падений за 10 с |
+| `exit(1)` при ошибке старта | с кодом 0 systemd считает запуск удачным и не перезапускает |
+
+Строка `автозапуск` в `punto doctor` показывает текущее состояние юнита
+(`enabled` / `disabled` / `not-found`).
+
+Проверить самовосстановление: `kill -9 $(pgrep -f 'punto-rs run')` — через
+3 секунды сервис снова `active`, `NRestarts` в `systemctl --user show` растёт.
+Если сессия уже была без демона: `systemctl --user reset-failed punto-rs &&
+systemctl --user start punto-rs`.
+
+## Трей: иконка как в Windows
+
+Опциональная фича `tray` — значок в системном трее с меню (реализация
+KDE/freedesktop StatusNotifierItem через крейт `ksni`, **без GTK** и
+`libappindicator`):
+
+```bash
+cargo build --release --features "input-evdev,tray"   # или: make build-tray
+./target/release/punto tray                            # иконка в трее
+# автозапуск вместе с сессией
+install -Dm644 packaging/punto-tray.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now punto-tray
+```
+
+Меню (как у Punto Switcher в Windows):
+
+| пункт | что делает |
+|---|---|
+| `punto-rs: работает · раскладка ru` | состояние: сервис, текущая раскладка |
+| `вывод: uinput · автоправка: выкл` | стратегия вставки, режим правки, ошибки действий |
+| ☑ `Демон запущен` | `systemctl --user start/stop punto-rs` |
+| ☑ `Автоправка по пробелу` | меняет `auto_convert` в `config.ini` (комментарии сохраняются) и перезапускает демон |
+| `Преобразовать слово` (комбинация из `convert_chord`) | шлёт комбинацию через uinput — демон исправляет последнее слово |
+| `Ещё → Проверить среду` | запускает `punto doctor` и показывает результат уведомлением |
+| `Ещё → Настройки` | открывает `config.ini` |
+| `Ещё → Журнал демона` | `journalctl --user -u punto-rs` в терминале |
+| `Перезапустить демон` / `Выход` | — |
+
+Иконка: 22×22, две половины (синяя EN / красная RU), серая — когда демон
+остановлен.
+
+**На GNOME иконки SNI не видны без расширения** — это ограничение оболочки:
+
+```bash
+sudo apt install gnome-shell-extension-appindicator
+gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com   # затем перелогиниться
+punto doctor        # строка «трей»: StatusNotifierWatcher есть
+```
+
+KDE Plasma показывает иконку штатно, sway/Hyprland — через waybar (`tray`) или
+`snixembed`. Если `StatusNotifierWatcher` нет, `punto tray` завершится с
+подсказкой, а `doctor` покажет `warn`.
 
 ## Wayland
 
@@ -217,14 +337,26 @@ layout_set_command = hyprctl switchxkblayout all next
 | симптом | причина и что делать |
 |---|---|
 | `doctor`: «нет доступа к /dev/input» | `sudo usermod -aG input $USER`, перелогиниться |
+| `doctor`: «нет прав на запись» у `/dev/uinput` | правило не установлено: `sudo cp packaging/99-punto-rs-uinput.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger`, перелогиниться (разово — `sudo chgrp input /dev/uinput && sudo chmod 660 /dev/uinput`) |
 | `doctor`: «нет /dev/uinput» | `sudo modprobe uinput` + правило из `packaging/` |
+| работало, но после перезагрузки перестало | `chmod`/`chgrp` на `/dev/uinput` живут до перезагрузки; нужно именно udev-правило из `packaging/` |
 | раскладка не переключается | GNOME: `g3kb-switch` (проверить `g3kb-switch -p`); X11: `xkb-switch -p` |
+| в журнале `Failed to activate layout N` | на GNOME 48 `g3kb-switch -s N` не работает (у `-n` работает): демон сам откатывается на `switch_command`; строку «установка раскладки» в `punto doctor` смотреть там же |
+| текст перемешивается: буквы прыгают в другую раскладку прямо при наборе | в `convert_hotkey` попала буква: старый дефолт `70` — это VK_F, а не ScrollLock. Поставьте `convert_hotkey = 0` (в журнале будет строка «ВНИМАНИЕ convert_hotkey = … это буква») |
+| слово не исправилось, в журнале «раскладку на … переключить не удалось» | переключение не сработало ни через `layout_set_command`, ни через `switch_command` — проверьте обе команды вручную |
+| иконки в трее нет, `punto tray` ругается на `StatusNotifierWatcher` | на GNOME нет расширения AppIndicator: `sudo apt install gnome-shell-extension-appindicator` (или скачать вручную), `gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com`, перелогиниться; `punto doctor` покажет строку «трей» |
+| после входа в систему демона нет | `systemctl --user reset-failed punto-rs && systemctl --user start punto-rs`, затем `journalctl --user -u punto-rs` (автозапуск — раздел «Автозапуск при входе в систему») |
 | слово исправилось, но раскладка прежняя | это режим `clipboard`: нужен `g3kb-switch` |
 | в терминале вставка не сработала | там `Ctrl+Shift+V`; задайте `output = uinput` |
 | в поле пароля не работает | вставка запрещена — используйте `output = uinput` |
 | печатаются не те символы | нестандартная раскладка: соберите с `--features xkb` и `text_mapper = xkb` |
 | символы дублируются | демон запущен дважды (`systemctl --user status punto-rs` + `pgrep -a punto`) |
 | ничего не происходит | клавиатура не в `/dev/input/event*` или нет прав — `punto doctor` |
+| нажимаю Ctrl+Shift, слово не исправляется | смотрите `journalctl --user -u punto-rs -n 20`: после комбинации демон пишет «ручная конвертация: …» с решением. «пустое слово» — возвращать нечего: буфер пуст и слово ещё не перепечатывалось (набрали пробел/Enter/знак или другое слово), «оставить» — словарь не увидел смысла, «раскладку на … переключить не удалось» — виновата команда переключения. Если строки нет вовсе — демон не услышал клавиатуру (см. ниже) |
+| повторное Ctrl+Shift со словом не срабатывает | слово возвращается обратно, только пока не набрано что-то новое: любой символ, пробел или Enter сбрасывают цикл («пустое слово» в журнале) |
+| комбинация не срабатывает от левых Ctrl+Shift | в конфиге указаны правые: `convert_chord = rctrl+rshift`. Замените на `ctrl+shift` — тогда подойдёт любая сторона |
+| после Ctrl+Shift+… (вставка, копирование) слово не тронуто | так и задумано: третья клавиша между модификаторами отменяет комбинацию |
+| демон «active», но клавиатура не слышна | поток чтения устройства умер (USB-переподключение, сон): теперь он переоткрывает устройство и пишет «ошибка чтения …, переоткрываю», а подключённые позже клавиатуры подхватываются заново («новая клавиатура — …»). `systemctl --user restart punto-rs` |
 
 ## Ограничения
 
@@ -242,9 +374,11 @@ layout_set_command = hyprctl switchxkblayout all next
 ## Разработка
 
 ```bash
-cargo test                                  # 23 теста ядра
+cargo test                                  # 40 тестов
 cargo build --features input-evdev          # демон (Linux)
 cargo check --features "input-evdev xkb"    # + xkbcommon
+cargo test  --features "input-evdev,tray"   # 48 тестов, включая трей
+cargo build --release --features "input-evdev,tray"   # демон + `punto tray`
 ```
 
 Структура и соответствие функциям оригинала — `docs/ARCHITECTURE.md`.

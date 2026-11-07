@@ -16,7 +16,7 @@ use crate::config::Config;
 use crate::keymap::Layout;
 
 #[cfg(unix)]
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Порядок раскладок в системе (`layout_order = en,ru`).
 pub fn order(cfg: &Config) -> Vec<Layout> {
@@ -127,6 +127,65 @@ pub fn switch_command(cfg: &Config, target: Layout) -> String {
     cfg.switch_command.clone()
 }
 
+/// Выполнить команду: важен только признак успеха, вывод не нужен.
+///
+/// Вывод глушим сознательно: неудачная попытка `g3kb-switch -s N` — ожидаемая
+/// ситуация (демон сразу пробует запасную команду), а её сообщение
+/// `Failed to activate layout N` в журнале только путает. Если не сработали обе
+/// команды, `serve()` напишет об этом сам.
+#[cfg(unix)]
+pub fn run_command(cmd: &str) -> bool {
+    Command::new("sh")
+        .args(["-c", cmd])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+pub fn run_command(_cmd: &str) -> bool {
+    false
+}
+
+/// Совпало ли системное состояние с ожидаемым.
+/// Определить раскладку нечем — считаем, что команда сработала.
+fn matches_state(cfg: &Config, target: Layout) -> bool {
+    detect(cfg).map(|l| l == target).unwrap_or(true)
+}
+
+/// Переключить раскладку на `target`, с запасным путём.
+///
+/// Практика (GNOME 48, `g3kb-switch` 1.5): `g3kb-switch -s 0` и `-s 1`
+/// отвечают `Failed to activate layout 0: <no details>` и выходят с кодом 1,
+/// хотя `-n` («следующая») работает. Поэтому при неудаче установки конкретной
+/// раскладки пробуем `switch_command` — при двух раскладках это то же самое.
+///
+/// `true` — раскладка в итоге стала `target` (или проверить нечем, и хоть одна
+/// команда отработала успешно).
+pub fn switch_to(cfg: &Config, target: Layout) -> bool {
+    // Уже в целевой раскладке — переключать нечего. Без этой проверки
+    // `switch_command` (`g3kb-switch -n`) уводил в соседнюю раскладку,
+    // проверка состояния не совпадала, и демон писал «слово не тронуто»:
+    // слово оставалось как было, хотя делать ничего и не требовалось.
+    if let Some(current) = detect(cfg) {
+        if current == target {
+            return true;
+        }
+    }
+    let set_cmd = switch_command(cfg, target);
+    if !set_cmd.trim().is_empty() && run_command(&set_cmd) && matches_state(cfg, target) {
+        return true;
+    }
+    let next = cfg.switch_command.trim().to_string();
+    if next.is_empty() || next == set_cmd {
+        return false;
+    }
+    run_command(&next) && matches_state(cfg, target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +225,58 @@ mod tests {
         cfg.layout_set_command = String::new();
         cfg.switch_command = "xkb-switch -n".into();
         assert_eq!(switch_command(&cfg, Layout::Ru), "xkb-switch -n");
+    }
+
+    /// `g3kb-switch -s N` на GNOME 48 падает, а `-n` работает: демон обязан
+    /// откатиться на «следующую раскладку», иначе слово не исправить вообще.
+    #[cfg(unix)]
+    #[test]
+    fn switch_to_falls_back_to_next_when_set_fails() {
+        let mut cfg = Config::default();
+        cfg.layout_get_command = "echo ru".into();
+        cfg.layout_set_command = "false".into();
+        cfg.switch_command = "true".into();
+        assert!(switch_to(&cfg, Layout::Ru), "должен сработать запасной -n");
+        // раскладка осталась us, значит переключения не было
+        cfg.layout_get_command = "echo us".into();
+        assert!(!switch_to(&cfg, Layout::Ru));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn switch_to_prefers_set_command() {
+        let mut cfg = Config::default();
+        cfg.layout_get_command = "echo us".into();
+        cfg.layout_set_command = "true".into();
+        cfg.switch_command = "false".into();
+        assert!(switch_to(&cfg, Layout::En));
+        assert!(!switch_to(&cfg, Layout::Ru), "set и next не сработали");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn switch_to_without_detect_trusts_command() {
+        let mut cfg = Config::default();
+        cfg.layout_get_command = "false".into(); // определить нечем
+        cfg.layout_set_command = "true".into();
+        assert!(switch_to(&cfg, Layout::Ru));
+        cfg.layout_set_command = "false".into();
+        cfg.switch_command = "false".into();
+        assert!(!switch_to(&cfg, Layout::Ru));
+    }
+
+    /// Раскладка уже целевая — переключать нечего.
+    ///
+    /// Именно здесь демон молчал в реальной жизни: `g3kb-switch -s N` на
+    /// GNOME 48 падает, запасной `-n` уводит в соседнюю раскладку, проверка
+    /// состояния не совпадает — и слово оставалось нетронутым.
+    #[cfg(unix)]
+    #[test]
+    fn switch_to_is_noop_when_already_there() {
+        let mut cfg = Config::default();
+        cfg.layout_get_command = "echo ru".into();
+        cfg.layout_set_command = "false".into();
+        cfg.switch_command = "false".into();
+        assert!(switch_to(&cfg, Layout::Ru), "раскладка уже ru");
     }
 }

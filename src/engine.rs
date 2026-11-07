@@ -5,6 +5,7 @@
 //! Ниже сохранена исходная структура ветвлений, чтобы поведение совпадало.
 
 use crate::dict::Dict;
+use std::sync::Arc;
 
 /// Куда идёт конвертация: через повторную проверку (`sub_41CAC0`)
 /// или напрямую (`sub_41CC00` + `sub_41B410`).
@@ -32,7 +33,9 @@ impl Decision {
 }
 
 pub struct Engine {
-    pub dict: Dict,
+    /// словарь общий с ядром (`App`), чтобы не держать вторую копию: на полных
+    /// словарях hunspell это сотни тысяч записей и десятки мегабайт
+    pub dict: Arc<Dict>,
     /// код последней клавиши (`this+112` в Punto)
     pub last_vk: u16,
 }
@@ -41,7 +44,7 @@ const VK_SUBTRACT: u16 = 0x6D;
 const VK_OEM_MINUS: u16 = 0xBD;
 
 impl Engine {
-    pub fn new(dict: Dict) -> Engine {
+    pub fn new(dict: Arc<Dict>) -> Engine {
         Engine { dict, last_vk: 0 }
     }
 

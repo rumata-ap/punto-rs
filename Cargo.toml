@@ -12,10 +12,16 @@ default = []
 input-evdev = ["dep:evdev"]
 # раскладко-независимое преобразование клавиш через libxkbcommon
 xkb = ["dep:xkbcommon"]
+# иконка в системном трее (StatusNotifierItem) — режим `punto tray`.
+# Требует более новый тулчейн, чем rust-version пакета.
+tray = ["dep:ksni"]
 
 [dependencies]
 evdev = { version = "0.12", optional = true }
 xkbcommon = { version = "0.7", optional = true }
+# трей без GTK/libappindicator: StatusNotifierItem напрямую по D-Bus.
+# blocking — синхронный API без tokio-рантайма в нашем коде.
+ksni = { version = "0.3", optional = true, features = ["blocking"] }
 
 [[bin]]
 name = "punto"

@@ -4,6 +4,7 @@ use punto_rs::app::{fix_two_upper_letters, looks_like_password};
 use punto_rs::dict::{flags_from_letters, Dict, Flags, F_CASE, F_E, F_EXACT, F_PREFIX};
 use punto_rs::engine::{Engine, Route};
 use punto_rs::keymap::{convert, KeyPress, Layout};
+use std::sync::Arc;
 
 const CHARSET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\
 абвгдеёжзийклмнопрстуфхцчшщъыьэюя\
@@ -28,7 +29,7 @@ fn dict() -> Dict {
 
 #[test]
 fn garbage_latin_switches_to_russian() {
-    let e = Engine::new(dict());
+    let e = Engine::new(Arc::new(dict()));
     let d = e.decide("ghbdtn", "привет");
     assert!(d.converts(), "ghbdtn -> привет должно переключать");
     assert_eq!(d.route, Route::Direct);
@@ -36,14 +37,14 @@ fn garbage_latin_switches_to_russian() {
 
 #[test]
 fn real_english_is_kept() {
-    let e = Engine::new(dict());
+    let e = Engine::new(Arc::new(dict()));
     let d = e.decide("hello", "руддщ");
     assert!(!d.converts(), "настоящее английское слово трогать нельзя");
 }
 
 #[test]
 fn real_russian_is_kept() {
-    let e = Engine::new(dict());
+    let e = Engine::new(Arc::new(dict()));
     let d = e.decide("привет", "ghbdtn");
     assert!(!d.converts(), "настоящее русское слово трогать нельзя");
 }
@@ -119,7 +120,7 @@ fn recheck_refuses_unknown_target() {
     use punto_rs::app::should_recheck_convert;
     let mut d = Dict::new(CHARSET);
     d.add("привет", F_EXACT | F_E);
-    let e = Engine::new(d.clone());
+    let e = Engine::new(Arc::new(d.clone()));
     // ничего не совпало ни в одной гипотезе → движок отдаёт Recheck
     let dec = e.decide("компь", "rjvgm");
     assert_eq!(dec.route, Route::Recheck);

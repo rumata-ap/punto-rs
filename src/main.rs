@@ -1,21 +1,13 @@
 //! CLI: `punto sim` (проверка алгоритма), `punto convert <текст>`, `punto run`.
 
 use punto_rs::app::{Action, App};
-use punto_rs::config::Config;
+use punto_rs::config::{self, Config};
 use punto_rs::keymap::{char_key, convert, KeyPress, Layout};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
 fn config_path() -> PathBuf {
-    match std::env::var_os("PUNTO_CONFIG") {
-        Some(p) => PathBuf::from(p),
-        None => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-            let base = std::env::var("XDG_CONFIG_HOME")
-                .unwrap_or_else(|_| format!("{}/.config", home));
-            PathBuf::from(format!("{}/punto-rs/config.ini", base))
-        }
-    }
+    config::config_path()
 }
 
 fn main() {
@@ -29,6 +21,7 @@ fn main() {
         }
         "run" => run(),
         "doctor" => doctor(),
+        "tray" => tray(),
         "-h" | "--help" | "help" => usage(),
         other => {
             eprintln!("неизвестный режим: {}", other);
@@ -45,6 +38,7 @@ fn usage() {
            punto sim        интерактивный прогон: строки на stdin, текущая раскладка RU\n\
            punto sim --en   то же, но текущая раскладка EN\n\
            punto convert X  показать решение для строки X\n\
+           punto tray       иконка в трее (сборка с --features input-evdev,tray)\n\
            punto run        демон (Linux, сборка с --features input-evdev)\n\n\
          словари: ~/.config/punto-rs/*.dict (формат: <PBCEAD><TAB>текст)"
     );
@@ -72,6 +66,10 @@ fn sim() {
     let current = if std::env::args().any(|a| a == "--en") { Layout::En } else { Layout::Ru };
     let mut app = load_app();
     app.layout = current;
+    // sim — демонстрация самого алгоритма: он показывает решение на границе
+    // слова, поэтому автосмена по пробелу включается здесь принудительно
+    // (в демоне она по умолчанию выключена, чтобы не мешать при наборе).
+    app.cfg.auto_convert = true;
     println!("словарей записей: {}", app.dict.entries.len());
     println!("текущая раскладка: {:?}; вводите строки, пустая строка — выход", current);
     let stdin = std::io::stdin();
@@ -129,13 +127,34 @@ fn is_cyrillic(c: char) -> bool {
     ('\u{0400}'..='\u{04FF}').contains(&c)
 }
 
+/// `punto tray` — иконка в системном трее (StatusNotifierItem).
+#[cfg(all(target_os = "linux", feature = "tray"))]
+fn tray() {
+    std::process::exit(punto_rs::tray::run());
+}
+
+#[cfg(not(all(target_os = "linux", feature = "tray")))]
+fn tray() {
+    eprintln!(
+        "режим tray требует Linux и сборки с фичей tray:\n  \
+         cargo build --release --features \"input-evdev,tray\""
+    );
+    std::process::exit(1);
+}
+
 #[cfg(all(target_os = "linux", feature = "input-evdev"))]
 fn run() {
     let cfg = Config::load(&config_path());
     let app = App::new(cfg);
     match punto_rs::io::serve(app) {
         Ok(()) => {}
-        Err(e) => eprintln!("ошибка ввода-вывода: {}", e),
+        Err(e) => {
+            eprintln!("ошибка ввода-вывода: {}", e);
+            // Ненулевой код обязателен: с нулём systemd считает запуск удачным
+            // и по Restart=on-failure демон больше не поднимает (так и было:
+            // «Permission denied» на /dev/uinput → сервис умер навсегда).
+            std::process::exit(1);
+        }
     }
 }
 

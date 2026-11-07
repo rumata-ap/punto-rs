@@ -1,14 +1,21 @@
 [Unit]
 Description=punto-rs — автоматическое переключение раскладки
 Documentation=https://github.com/rumata-ap/punto-rs
+# стартуем вместе с графической сессией (демону нужны раскладка и g3kb-switch)
 After=graphical-session.target
 PartOf=graphical-session.target
+# не сдаваться, если сессия ещё не готова: лимит перезапусков выключен,
+# иначе после 5 падений за 10 с systemd оставляет сервис мёртвым до перезагрузки
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/punto-rs run
-Restart=on-failure
-RestartSec=2
+Restart=always
+RestartSec=3
+# ждём, пока расширение GNOME Shell ответит: на входе в сессию
+# graphical-session.target достигается раньше, чем готов g3kb-switch
+ExecStartPre=-/bin/sh -c 'export PATH="$HOME/.local/bin:$PATH"; i=0; while [ $i -lt 60 ]; do g3kb-switch -p >/dev/null 2>&1 && exit 0; i=$((i+1)); sleep 1; done; exit 0'
 # демон читает /dev/input и пишет в /dev/uinput, ему нужна группа input
 SupplementaryGroups=input
 Nice=5
