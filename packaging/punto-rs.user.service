@@ -1,0 +1,26 @@
+[Unit]
+Description=punto-rs — автоматическое переключение раскладки (домашняя установка)
+Documentation=https://github.com/rumata-ap/punto-rs
+# стартуем вместе с графической сессией: демону нужны /dev/uinput и g3kb-switch
+After=graphical-session.target
+PartOf=graphical-session.target
+# не сдаваться, если сессия ещё не готова: лимит перезапусков выключен,
+# иначе после 5 падений за 10 с systemd оставляет сервис мёртвым до перезагрузки
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# бинарник из `make install-user`; конфиг — ~/.config/punto-rs/config.ini
+ExecStart=%h/.local/bin/punto-rs run
+Restart=always
+RestartSec=3
+# ждём, пока расширение GNOME Shell ответит: на входе в сессию
+# graphical-session.target достигается раньше, чем готов g3kb-switch
+ExecStartPre=-/bin/sh -c 'export PATH="$HOME/.local/bin:$PATH"; i=0; while [ $i -lt 60 ]; do g3kb-switch -p >/dev/null 2>&1 && exit 0; i=$((i+1)); sleep 1; done; exit 0'
+# ВАЖНО: `SupplementaryGroups=input` здесь ломает запуск — user-менеджер не может
+# менять группы и systemd падает с 216/GROUP. Права на /dev/input и /dev/uinput
+# даёт членство в группе `input`, унаследованное при входе в систему.
+Nice=5
+
+[Install]
+WantedBy=graphical-session.target

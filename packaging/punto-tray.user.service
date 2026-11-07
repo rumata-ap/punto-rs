@@ -1,0 +1,20 @@
+[Unit]
+Description=punto-rs — иконка в трее (домашняя установка, StatusNotifierItem)
+Documentation=https://github.com/rumata-ap/punto-rs
+# иконка поднимается вместе с сессией; требует фичи `tray` в сборке
+After=graphical-session.target
+PartOf=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/punto-rs tray
+# ждём, пока оболочка зарегистрирует StatusNotifierWatcher: на входе в сессию
+# расширение AppIndicator поднимается позже graphical-session.target
+ExecStartPre=-/bin/sh -c 'i=0; while [ $i -lt 60 ]; do gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.ListNames 2>/dev/null | grep -q StatusNotifierWatcher && exit 0; i=$((i+1)); sleep 1; done; exit 0'
+# без AppIndicator-расширения GNOME трей недоступен: не долбим перезапусками
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=graphical-session.target

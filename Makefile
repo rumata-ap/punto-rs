@@ -51,8 +51,10 @@ install-user:
 	cargo build --release --features "input-evdev,tray"
 	install -d $(USER_BIN) $(USER_UNITS) $(USER_CONF)
 	install -m 755 target/release/punto $(USER_BIN)/punto-rs
-	install -m 644 packaging/punto-rs.service $(USER_UNITS)/
-	install -m 644 packaging/punto-tray.service $(USER_UNITS)/
+	# домашняя установка берёт юниты с %h/.local/bin и БЕЗ SupplementaryGroups:
+	# user-менеджер не может менять группы (systemd падает с 216/GROUP)
+	install -m 644 packaging/punto-rs.user.service $(USER_UNITS)/punto-rs.service
+	install -m 644 packaging/punto-tray.user.service $(USER_UNITS)/punto-tray.service
 	@test -f $(USER_CONF)/config.ini || \
 		(echo "конфиг: $(USER_CONF)/config.ini из data/config.example.ini" && \
 		 install -m 644 data/config.example.ini $(USER_CONF)/config.ini)

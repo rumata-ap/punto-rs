@@ -192,8 +192,12 @@ make uninstall-user      # обратно (конфиг и словари ост
 # из пакета / make install (юнит в /usr/local/lib/systemd/user)
 systemctl --user enable --now punto-rs.service
 
-# свой бинарник в ~/.local/bin
-install -Dm644 packaging/punto-rs.service ~/.config/systemd/user/punto-rs.service
+# свой бинарник в ~/.local/bin — юнит именно user-вариант:
+# в packaging/*.service лежат системные (ExecStart=/usr/bin, SupplementaryGroups),
+# для домашней установки они не годятся: user-менеджер не может менять группы
+# и systemd падает с 216/GROUP
+install -Dm644 packaging/punto-rs.user.service ~/.config/systemd/user/punto-rs.service
+install -Dm644 packaging/punto-tray.user.service ~/.config/systemd/user/punto-tray.service
 systemctl --user daemon-reload
 systemctl --user enable --now punto-rs.service
 
@@ -346,6 +350,8 @@ layout_set_command = hyprctl switchxkblayout all next
 | слово не исправилось, в журнале «раскладку на … переключить не удалось» | переключение не сработало ни через `layout_set_command`, ни через `switch_command` — проверьте обе команды вручную |
 | иконки в трее нет, `punto tray` ругается на `StatusNotifierWatcher` | на GNOME нет расширения AppIndicator: `sudo apt install gnome-shell-extension-appindicator` (или скачать вручную), `gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com`, перелогиниться; `punto doctor` покажет строку «трей» |
 | после входа в систему демона нет | `systemctl --user reset-failed punto-rs && systemctl --user start punto-rs`, затем `journalctl --user -u punto-rs` (автозапуск — раздел «Автозапуск при входе в систему») |
+| служба в цикле перезапусков, в журнале `216/GROUP` | в `~/.config/systemd/user/` попал **системный** юнит: `SupplementaryGroups=input` user-менеджер применить не может. Поставьте user-вариант: `make install-user` (или `install -Dm644 packaging/punto-rs.user.service ~/.config/systemd/user/punto-rs.service`) и `systemctl --user daemon-reload` |
+| в журнале `Unable to locate executable '/usr/bin/punto-rs'` / `203/EXEC` | то же самое: юнит ждёт бинарник из пакета, а установлен домашний. Нужен `packaging/*.user.service` (`ExecStart=%h/.local/bin/punto-rs`) |
 | слово исправилось, но раскладка прежняя | это режим `clipboard`: нужен `g3kb-switch` |
 | в терминале вставка не сработала | там `Ctrl+Shift+V`; задайте `output = uinput` |
 | в поле пароля не работает | вставка запрещена — используйте `output = uinput` |
